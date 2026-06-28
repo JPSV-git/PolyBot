@@ -12,7 +12,7 @@ DB_PATH = Path(__file__).parent / "data" / "polybot.db"
 
 DEFAULT_BALANCE = 1000.0
 MAX_CONCURRENT_POSITIONS = 5
-RISK_PER_TRADE = 0.03          # 3% of balance per trade
+RISK_PER_TRADE = 0.05          # 5% of balance per trade
 SPREAD_COST = 0.01             # 1 cent per trade (entry + exit)
 MIN_TRADE_USD = 1.0
 STARTUP_GRACE_SEC = 120        # no entries for 2 min after server start
@@ -32,35 +32,12 @@ MONTHLY_SLUG_TEMPLATE = "what-price-will-bitcoin-hit-in-{month}-{year}"
 # ── The 4 validated strategies ────────────────────────────────────────────────
 
 STRATEGIES = {
-    "A": {
-        "name": "BUY reach on BTC momentum",
-        "description": "When BTC has 1h upward momentum >1%, buy YES on reach strikes 2-10% OTM. Hold 4h.",
-        "action": "BUY",
-        "token_side": "yes",
-        "market_type": "reach",
-        "trigger_type": "btc_momentum",
-        "btc_1h_threshold": 1.0,
-        "moneyness_min": -10.0,
-        "moneyness_max": -2.0,
-        "hold_hours": 4,
-        "expected_wr": 65,
-        "priority": 3,
-    },
-    "B": {
-        "name": "BUY dip on RSI oversold",
-        "description": "When RSI(14) < 30, buy YES on dip strikes 0-10% ITM. Hold 24h. Big wins on reversal.",
-        "action": "BUY",
-        "token_side": "yes",
-        "market_type": "dip",
-        "trigger_type": "rsi",
-        "rsi_threshold": 30,
-        "rsi_direction": "below",
-        "moneyness_min": 0.0,
-        "moneyness_max": 10.0,
-        "hold_hours": 24,
-        "expected_wr": 50,
-        "priority": 4,
-    },
+    # A and B are disabled — they showed 65%/50% WR in the bar-level analysis but
+    # only 27%/18% WR in sequential backtesting. The analysis inflated WR by counting
+    # overlapping positions. Only SELL strategies (C, D) survive real sequential trading.
+    #
+    # "A": { ... BUY reach on BTC momentum — DISABLED },
+    # "B": { ... BUY dip on RSI oversold — DISABLED },
     "C": {
         "name": "SELL reach on RSI oversold",
         "description": "When RSI(14) < 35, sell YES (buy NO) on reach strikes near ATM. Hold 24h.",
@@ -75,6 +52,7 @@ STRATEGIES = {
         "hold_hours": 24,
         "expected_wr": 80,
         "priority": 2,
+        "max_entries_per_signal": 1,
     },
     "D": {
         "name": "SELL dip on BTC surge",
@@ -89,5 +67,6 @@ STRATEGIES = {
         "hold_hours": 4,
         "expected_wr": 90,
         "priority": 1,
+        "max_entries_per_signal": 1,
     },
 }

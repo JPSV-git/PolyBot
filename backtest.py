@@ -144,11 +144,10 @@ def run_backtest(
                 still_open.append(pos)
         open_positions = still_open
 
-        # Evaluate new entries
+        # Evaluate new entries — collect candidates, pick best per strategy
         if len(open_positions) < max_positions and capital > 5:
+            candidates = []  # (sid, market, moneyness, yes_price)
             for market in markets:
-                if len(open_positions) >= max_positions:
-                    break
                 tp = market["target_price"]
                 mtype = market.get("market_type", "reach")
                 moneyness = compute_moneyness(tp, btc_price, mtype)
@@ -162,9 +161,10 @@ def run_backtest(
 
                 if dte < MIN_DTE:
                     continue
+                if any(p["market_id"] == market["market_id"] for p in open_positions):
+                    continue
 
-                # Check each strategy
-                for sid, strat in sorted(STRATEGIES.items(), key=lambda x: x[1]["priority"]):
+                for sid, strat in STRATEGIES.items():
                     if strat["market_type"] != mtype:
                         continue
                     if not (strat["moneyness_min"] <= moneyness <= strat["moneyness_max"]):
@@ -177,12 +177,26 @@ def run_backtest(
                         if strat["rsi_direction"] == "below":
                             triggered = rsi < strat["rsi_threshold"]
 
-                    if not triggered:
-                        continue
+                    if triggered:
+                        candidates.append((sid, market, moneyness, yes_price))
 
-                    # Don't double up on same market
-                    if any(p["market_id"] == market["market_id"] for p in open_positions):
-                        continue
+            # Pick best candidate per strategy (closest to ATM)
+            best = {}
+            for sid, market, moneyness, yes_price in candidates:
+                max_per = STRATEGIES[sid].get("max_entries_per_signal", 1)
+                if sid not in best:
+                    best[sid] = []
+                best[sid].append((abs(moneyness), market, yes_price))
+
+            for sid in sorted(best.keys(), key=lambda s: STRATEGIES[s]["priority"]):
+                if len(open_positions) >= max_positions:
+                    break
+                strat = STRATEGIES[sid]
+                max_per = strat.get("max_entries_per_signal", 1)
+                entries = sorted(best[sid])[:max_per]
+                for _, market, yes_price in entries:
+                    if len(open_positions) >= max_positions:
+                        break
 
                     amount = round(capital * risk_pct, 2)
                     if amount < 1:
@@ -195,8 +209,8 @@ def run_backtest(
                         "strategy": sid,
                         "market_id": market["market_id"],
                         "market_title": market.get("title", ""),
-                        "target_price": tp,
-                        "market_type": mtype,
+                        "target_price": market["target_price"],
+                        "market_type": market.get("market_type", "reach"),
                         "action": strat["action"],
                         "entry_price": yes_price,
                         "amount": amount,
@@ -204,7 +218,6 @@ def run_backtest(
                         "entry_ts": ts,
                         "hold_hours": strat["hold_hours"],
                     })
-                    break  # one entry per market per tick
 
         # Record equity
         open_value = sum(p["amount"] for p in open_positions)

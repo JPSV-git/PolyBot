@@ -17,16 +17,13 @@ def compute_indicators(closes_1m: List[float]) -> Dict:
 
 def compute_moneyness(target_price: float, btc_price: float, market_type: str) -> float:
     """
-    For 'reach' markets: negative = OTM (BTC below target), positive = ITM
-    For 'dip' markets:   negative = OTM (BTC above target), positive = ITM (BTC already dipped past)
-    This matches the analysis convention used in strategy discovery.
+    Same formula for both market types: (btc_price - target_price) / target_price * 100
+    Positive = BTC is above target, Negative = BTC is below target.
+    This matches the original analysis convention exactly.
     """
-    if btc_price == 0:
+    if btc_price == 0 or target_price == 0:
         return 0
-    if market_type == "reach":
-        return (btc_price - target_price) / target_price * 100
-    else:
-        return (target_price - btc_price) / btc_price * 100
+    return (btc_price - target_price) / target_price * 100
 
 
 def find_eligible_trades(indicators: Dict, markets: List[Dict]) -> List[Dict]:
@@ -81,5 +78,20 @@ def find_eligible_trades(indicators: Dict, markets: List[Dict]) -> List[Dict]:
                     "bid_depth_usd": market.get("bid_depth_usd", 0),
                 })
 
-    candidates.sort(key=lambda x: x["priority"])
-    return candidates
+    # For each strategy, pick only the best candidate (closest to ATM)
+    best_per_strat = {}
+    for c in candidates:
+        sid = c["strategy"]
+        max_per = STRATEGIES[sid].get("max_entries_per_signal", 99)
+        if sid not in best_per_strat:
+            best_per_strat[sid] = []
+        best_per_strat[sid].append(c)
+
+    final = []
+    for sid, cands in best_per_strat.items():
+        max_per = STRATEGIES[sid].get("max_entries_per_signal", 99)
+        cands.sort(key=lambda x: abs(x["moneyness_pct"]))
+        final.extend(cands[:max_per])
+
+    final.sort(key=lambda x: x["priority"])
+    return final
