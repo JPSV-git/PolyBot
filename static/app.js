@@ -6,6 +6,28 @@ let btEquityChart = null;
 let paperEquityChart = null;
 let paperPollInterval = null;
 
+// ── Crosshair plugin ────────────────────────────────────────────────────────
+
+const crosshairPlugin = {
+    id: 'crosshair',
+    afterDraw(chart) {
+        if (!chart._active || !chart._active.length) return;
+        const ctx = chart.ctx;
+        const x = chart._active[0].element.x;
+        const topY = chart.scales.yYES ? chart.scales.yYES.top : chart.chartArea.top;
+        const bottomY = chart.scales.yYES ? chart.scales.yYES.bottom : chart.chartArea.bottom;
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(x, topY);
+        ctx.lineTo(x, bottomY);
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+        ctx.setLineDash([4, 4]);
+        ctx.stroke();
+        ctx.restore();
+    }
+};
+
 // ── Tab switching ───────────────────────────────────────────────────────────
 
 document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -71,52 +93,62 @@ async function loadStrikes() {
     const resp = await fetch('/api/strikes');
     const data = await resp.json();
     const sel = document.getElementById('chartStrike');
-    sel.innerHTML = data.map(s =>
-        `<option value="${s.target_price}">${s.markets.map(m => m.market_type === 'dip' ? 'Dip' : 'Reach').join('/')} $${s.target_price.toLocaleString()}</option>`
-    ).join('');
-    // Pre-select first 3
-    for (let i = 0; i < Math.min(3, sel.options.length); i++) sel.options[i].selected = true;
+    sel.innerHTML = '';
+    for (const s of data) {
+        for (const m of s.markets) {
+            const opt = document.createElement('option');
+            opt.value = m.market_id;
+            opt.dataset.strike = s.target_price;
+            opt.dataset.type = m.market_type;
+            const typeLabel = m.market_type === 'dip' ? 'Dip' : 'Reach';
+            opt.textContent = `${typeLabel} $${s.target_price.toLocaleString()}`;
+            sel.appendChild(opt);
+        }
+    }
+    // Pre-select some interesting markets (near mid-range strikes)
+    const opts = Array.from(sel.options);
+    const midIdx = Math.floor(opts.length / 2);
+    for (let i = Math.max(0, midIdx - 1); i < Math.min(opts.length, midIdx + 2); i++) {
+        opts[i].selected = true;
+    }
 }
 
 async function loadChart() {
     const range = document.getElementById('chartRange').value;
     const sel = document.getElementById('chartStrike');
-    const selectedStrikes = Array.from(sel.selectedOptions).map(o => parseFloat(o.value));
+    const selectedOpts = Array.from(sel.selectedOptions);
 
     // Get BTC data
     const btcResp = await fetch(`/api/btc-candles?range=${range}`);
     const btcData = await btcResp.json();
 
-    // Get market data for selected strikes
-    const marketsResp = await fetch('/api/markets');
-    const markets = await marketsResp.json();
-
     const colors = ['#4f8ff7', '#22c55e', '#ef4444', '#f59e0b', '#a855f7', '#ec4899', '#06b6d4', '#84cc16'];
     const datasets = [];
 
-    // Polymarket lines first (left axis) — collect their time range
+    // Polymarket lines (left axis)
     let colorIdx = 0;
     let allTimestamps = [];
-    for (const strike of selectedStrikes) {
-        const strikeMarkets = markets.filter(m => m.target_price === strike);
-        for (const m of strikeMarkets) {
-            const histResp = await fetch(`/api/market-history?market_id=${m.market_id}&range=${range}`);
-            const hist = await histResp.json();
-            if (!hist.length) continue;
+    for (const opt of selectedOpts) {
+        const marketId = opt.value;
+        const strike = opt.dataset.strike;
+        const type = opt.dataset.type;
 
-            const type = m.market_type || (m.title.toLowerCase().includes('dip') ? 'dip' : 'reach');
-            const data = hist.map(h => ({ x: h.ts * 1000, y: h.price }));
-            data.forEach(d => allTimestamps.push(d.x));
-            datasets.push({
-                label: `${type === 'dip' ? 'Dip' : 'Reach'} $${strike.toLocaleString()}`,
-                data,
-                borderColor: colors[colorIdx % colors.length],
-                borderWidth: 2,
-                pointRadius: 0,
-                yAxisID: 'yYES',
-            });
-            colorIdx++;
-        }
+        const histResp = await fetch(`/api/market-history?market_id=${marketId}&range=${range}`);
+        const hist = await histResp.json();
+        if (!hist.length) continue;
+
+        const typeLabel = type === 'dip' ? 'Dip' : 'Reach';
+        const data = hist.map(h => ({ x: h.ts * 1000, y: h.price }));
+        data.forEach(d => allTimestamps.push(d.x));
+        datasets.push({
+            label: `${typeLabel} $${parseFloat(strike).toLocaleString()}`,
+            data,
+            borderColor: colors[colorIdx % colors.length],
+            borderWidth: 2,
+            pointRadius: 0,
+            yAxisID: 'yYES',
+        });
+        colorIdx++;
     }
 
     // BTC line (right axis) — filter to match polymarket time range
@@ -142,31 +174,57 @@ async function loadChart() {
 
     if (priceChart) priceChart.destroy();
 
+    // Compute Y range from polymarket data for better scaling
+    let yMin = 0, yMax = 1;
+    const polyDatasets = datasets.filter(d => d.yAxisID === 'yYES');
+    if (polyDatasets.length) {
+        const allY = polyDatasets.flatMap(d => d.data.map(p => p.y));
+        if (allY.length) {
+            yMin = Math.max(0, Math.min(...allY) - 0.05);
+            yMax = Math.min(1, Math.max(...allY) + 0.05);
+        }
+    }
+
     const ctx = document.getElementById('priceChart').getContext('2d');
     priceChart = new Chart(ctx, {
         type: 'line',
         data: { datasets },
+        plugins: [crosshairPlugin],
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            interaction: { mode: 'index', intersect: false },
+            interaction: { mode: 'nearest', axis: 'x', intersect: false },
+            hover: { mode: 'nearest', axis: 'x', intersect: false },
             plugins: {
                 tooltip: {
+                    mode: 'nearest',
+                    axis: 'x',
+                    intersect: false,
+                    position: 'nearest',
                     callbacks: {
                         title: (items) => {
                             if (!items.length) return '';
                             const ts = items[0].raw.x;
-                            return new Date(ts).toLocaleString();
+                            const d = new Date(ts);
+                            return d.toLocaleDateString(undefined, {weekday:'short', month:'short', day:'numeric', year:'numeric'}) + '  ' + d.toLocaleTimeString();
                         },
                         label: (item) => {
                             const v = item.raw.y;
                             if (item.dataset.yAxisID === 'yBTC')
-                                return `${item.dataset.label}: $${v.toLocaleString(undefined, {maximumFractionDigits: 0})}`;
-                            return `${item.dataset.label}: $${v.toFixed(3)}`;
+                                return `  ${item.dataset.label}: $${v.toLocaleString(undefined, {maximumFractionDigits: 0})}`;
+                            return `  ${item.dataset.label}: $${v.toFixed(3)} (${(v*100).toFixed(1)}%)`;
                         }
                     }
                 },
-                legend: { labels: { color: '#8b90a0', font: { size: 11 } } },
+                legend: {
+                    labels: { color: '#8b90a0', font: { size: 11 }, usePointStyle: true, pointStyle: 'line' },
+                    onClick: (e, legendItem, legend) => {
+                        const idx = legendItem.datasetIndex;
+                        const meta = legend.chart.getDatasetMeta(idx);
+                        meta.hidden = !meta.hidden;
+                        legend.chart.update();
+                    }
+                },
             },
             scales: {
                 x: {
@@ -175,9 +233,9 @@ async function loadChart() {
                         color: '#8b90a0',
                         callback: (v) => {
                             const d = new Date(v);
-                            return d.toLocaleDateString(undefined, {month:'short', day:'numeric'});
+                            return d.toLocaleDateString(undefined, {month:'short', day:'numeric'}) + ' ' + d.toLocaleTimeString(undefined, {hour:'2-digit', minute:'2-digit'});
                         },
-                        maxTicksLimit: 10,
+                        maxTicksLimit: 8,
                     },
                     grid: { color: '#2d3140' },
                 },
@@ -186,12 +244,12 @@ async function loadChart() {
                     title: { display: true, text: 'YES Price ($)', color: '#8b90a0' },
                     ticks: { color: '#8b90a0', callback: v => '$' + v.toFixed(2) },
                     grid: { color: '#2d3140' },
-                    min: 0, max: 1,
+                    min: yMin, max: yMax,
                 },
                 yBTC: {
                     position: 'right',
                     title: { display: true, text: 'BTC ($)', color: '#666' },
-                    ticks: { color: '#666', callback: v => '$' + (v/1000).toFixed(0) + 'k' },
+                    ticks: { color: '#666', callback: v => '$' + (v/1000).toFixed(1) + 'k' },
                     grid: { display: false },
                 },
             },

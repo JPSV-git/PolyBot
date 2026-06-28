@@ -302,18 +302,19 @@ async def api_market_history(market_id: str, range: str = "1m"):
     seconds = ranges.get(range, 30 * 86400)
     start = now - seconds
 
-    # Combine both sources: backfill history + live snapshots
+    # Combine both sources: backfill history + live snapshots, filter bad values
     points = {}
     history = db.get_price_history(market_id=market_id)
     for h in history:
-        if h["timestamp"] >= start:
+        if h["timestamp"] >= start and h["yes_price"] and h["yes_price"] > 0:
             points[h["timestamp"]] = h["yes_price"]
     snapshots = db.get_price_snapshots(market_id, start_ts=start)
     for s in snapshots:
-        points[s["timestamp"]] = s["yes_mid"]
+        if s["yes_mid"] and s["yes_mid"] > 0:
+            points[s["timestamp"]] = s["yes_mid"]
 
     sorted_pts = sorted(points.items())
-    return [{"ts": ts, "price": price} for ts, price in sorted_pts]
+    return [{"ts": ts, "price": round(price, 4)} for ts, price in sorted_pts]
 
 
 @app.get("/api/strikes")
