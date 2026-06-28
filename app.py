@@ -125,29 +125,41 @@ async def polymarket_price_loop():
 
 
 async def price_history_backfill_loop():
+    """Backfill price history for any market that has no history yet. Runs periodically."""
     await asyncio.sleep(15)
-    try:
-        existing = db.get_price_history_count()
-        if existing > 0:
-            print(f"[backfill] Already have {existing} price history points, skipping")
-            return
-        markets = db.get_markets()
-        if not markets:
-            print("[backfill] No markets yet, will retry later")
-            return
-        total = 0
-        for m in markets:
-            token = m.get("yes_token_id")
-            if not token:
+    while True:
+        try:
+            markets = db.get_markets()
+            if not markets:
+                print("[backfill] No markets yet, waiting...")
+                await asyncio.sleep(300)
                 continue
-            history = await poly.fetch_price_history(token)
-            if history:
-                stored = db.store_price_history_bulk(m["market_id"], history)
-                total += stored
-            await asyncio.sleep(0.3)
-        print(f"[backfill] Stored {total} historical price points")
-    except Exception as e:
-        print(f"[backfill] {e}")
+            # Only backfill markets that have no history stored yet
+            markets_needing_backfill = []
+            for m in markets:
+                if not m.get("yes_token_id"):
+                    continue
+                existing = db.get_price_history(market_id=m["market_id"])
+                if not existing:
+                    markets_needing_backfill.append(m)
+            if not markets_needing_backfill:
+                await asyncio.sleep(3600)  # check again in 1h (new month may bring new markets)
+                continue
+            print(f"[backfill] {len(markets_needing_backfill)} markets need history backfill")
+            total = 0
+            for m in markets_needing_backfill:
+                token = m.get("yes_token_id")
+                if not token:
+                    continue
+                history = await poly.fetch_price_history(token)
+                if history:
+                    stored = db.store_price_history_bulk(m["market_id"], history)
+                    total += stored
+                await asyncio.sleep(0.3)
+            print(f"[backfill] Stored {total} historical price points")
+        except Exception as e:
+            print(f"[backfill] {e}")
+        await asyncio.sleep(3600)
 
 
 async def paper_trading_loop():
