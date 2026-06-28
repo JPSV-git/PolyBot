@@ -5,6 +5,7 @@ FastAPI server — background data loops, API routes, WebSocket.
 import asyncio
 import json
 import time
+from pathlib import Path
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from typing import Optional
@@ -13,6 +14,8 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+
+BASE_DIR = Path(__file__).parent
 
 import db
 import binance
@@ -255,13 +258,13 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="PolyBot", lifespan=lifespan)
-app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
 # ── Routes: Pages ────────────────────────────────────────────────────────────
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
-    return FileResponse("static/index.html")
+    return FileResponse(str(BASE_DIR / "static" / "index.html"))
 
 # ── Routes: Charts tab ───────────────────────────────────────────────────────
 

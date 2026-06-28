@@ -37,7 +37,7 @@ async def get_klines(start_ms: int, end_ms: int = None, interval: str = "1m", li
             except Exception as e:
                 print(f"[binance] klines error: {e}")
                 break
-            if not data:
+            if not data or not isinstance(data, list):
                 break
             for k in data:
                 candles.append({
