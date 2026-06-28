@@ -16,12 +16,17 @@ def compute_indicators(closes_1m: List[float]) -> Dict:
 
 
 def compute_moneyness(target_price: float, btc_price: float, market_type: str) -> float:
+    """
+    For 'reach' markets: negative = OTM (BTC below target), positive = ITM
+    For 'dip' markets:   negative = OTM (BTC above target), positive = ITM (BTC already dipped past)
+    This matches the analysis convention used in strategy discovery.
+    """
     if btc_price == 0:
         return 0
-    raw_pct = (btc_price - target_price) / target_price * 100
-    if market_type == "dip":
-        return raw_pct
-    return -raw_pct
+    if market_type == "reach":
+        return (btc_price - target_price) / target_price * 100
+    else:
+        return (target_price - btc_price) / btc_price * 100
 
 
 def find_eligible_trades(indicators: Dict, markets: List[Dict]) -> List[Dict]:

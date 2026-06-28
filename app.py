@@ -59,7 +59,7 @@ async def btc_candle_sync_loop():
                 start = latest + 60_000
             else:
                 now = int(time.time() * 1000)
-                start = now - 30 * 24 * 3600 * 1000  # 30 days back
+                start = now - 60 * 24 * 3600 * 1000  # 60 days back for full backtest coverage
 
             end = int(time.time() * 1000)
             if start < end:
@@ -297,19 +297,23 @@ async def api_months():
 
 @app.get("/api/market-history")
 async def api_market_history(market_id: str, range: str = "1m"):
-    # Try snapshots first (live data), fall back to price_history (backfill)
     now = int(time.time())
     ranges = {"1d": 86400, "1w": 7 * 86400, "1m": 30 * 86400}
     seconds = ranges.get(range, 30 * 86400)
     start = now - seconds
 
-    snapshots = db.get_price_snapshots(market_id, start_ts=start)
-    if snapshots:
-        return [{"ts": s["timestamp"], "price": s["yes_mid"]} for s in snapshots]
-
+    # Combine both sources: backfill history + live snapshots
+    points = {}
     history = db.get_price_history(market_id=market_id)
-    filtered = [h for h in history if h["timestamp"] >= start]
-    return [{"ts": h["timestamp"], "price": h["yes_price"]} for h in filtered]
+    for h in history:
+        if h["timestamp"] >= start:
+            points[h["timestamp"]] = h["yes_price"]
+    snapshots = db.get_price_snapshots(market_id, start_ts=start)
+    for s in snapshots:
+        points[s["timestamp"]] = s["yes_mid"]
+
+    sorted_pts = sorted(points.items())
+    return [{"ts": ts, "price": price} for ts, price in sorted_pts]
 
 
 @app.get("/api/strikes")
@@ -321,6 +325,26 @@ async def api_strikes(month: Optional[str] = None):
         {"market_id": mk["market_id"], "title": mk["title"], "market_type": mk["market_type"]}
         for mk in markets if mk["target_price"] == s
     ]} for s in strikes]
+
+
+@app.post("/api/import-btc-from-trading")
+async def api_import_btc():
+    """Import BTC candles from the original Trading app's DB if available."""
+    import sqlite3 as _sql
+    src = Path.home() / "Desktop" / "Trading" / "data" / "trading.db"
+    if not src.exists():
+        return {"error": "Trading app DB not found"}
+    def _import():
+        conn_src = _sql.connect(str(src))
+        rows = conn_src.execute("SELECT timestamp, open, high, low, close, volume FROM historical_btc ORDER BY timestamp").fetchall()
+        conn_src.close()
+        if not rows:
+            return {"imported": 0}
+        candles = [{"ts": r[0], "open": r[1], "high": r[2], "low": r[3], "close": r[4], "volume": r[5]} for r in rows]
+        db.store_btc_candles(candles)
+        return {"imported": len(candles)}
+    result = await asyncio.get_event_loop().run_in_executor(None, _import)
+    return result
 
 
 # ── Routes: Strategy & Backtest tab ──────────────────────────────────────────

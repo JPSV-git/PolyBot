@@ -34,12 +34,12 @@ MONTHLY_SLUG_TEMPLATE = "what-price-will-bitcoin-hit-in-{month}-{year}"
 STRATEGIES = {
     "A": {
         "name": "BUY reach on BTC momentum",
-        "description": "When BTC has 1h upward momentum >0.5%, buy YES on reach strikes 2-10% OTM. Hold 4h.",
+        "description": "When BTC has 1h upward momentum >1%, buy YES on reach strikes 2-10% OTM. Hold 4h.",
         "action": "BUY",
         "token_side": "yes",
         "market_type": "reach",
         "trigger_type": "btc_momentum",
-        "btc_1h_threshold": 0.5,
+        "btc_1h_threshold": 1.0,
         "moneyness_min": -10.0,
         "moneyness_max": -2.0,
         "hold_hours": 4,

@@ -94,21 +94,9 @@ async function loadChart() {
     const colors = ['#4f8ff7', '#22c55e', '#ef4444', '#f59e0b', '#a855f7', '#ec4899', '#06b6d4', '#84cc16'];
     const datasets = [];
 
-    // BTC line (right axis)
-    if (btcData.length) {
-        datasets.push({
-            label: 'BTC Price',
-            data: btcData.map(c => ({ x: c.ts, y: c.close })),
-            borderColor: '#666',
-            borderWidth: 1.5,
-            pointRadius: 0,
-            yAxisID: 'yBTC',
-            order: 10,
-        });
-    }
-
-    // Polymarket lines (left axis)
+    // Polymarket lines first (left axis) — collect their time range
     let colorIdx = 0;
+    let allTimestamps = [];
     for (const strike of selectedStrikes) {
         const strikeMarkets = markets.filter(m => m.target_price === strike);
         for (const m of strikeMarkets) {
@@ -117,15 +105,38 @@ async function loadChart() {
             if (!hist.length) continue;
 
             const type = m.market_type || (m.title.toLowerCase().includes('dip') ? 'dip' : 'reach');
+            const data = hist.map(h => ({ x: h.ts * 1000, y: h.price }));
+            data.forEach(d => allTimestamps.push(d.x));
             datasets.push({
                 label: `${type === 'dip' ? 'Dip' : 'Reach'} $${strike.toLocaleString()}`,
-                data: hist.map(h => ({ x: h.ts * 1000, y: h.price })),
+                data,
                 borderColor: colors[colorIdx % colors.length],
                 borderWidth: 2,
                 pointRadius: 0,
                 yAxisID: 'yYES',
             });
             colorIdx++;
+        }
+    }
+
+    // BTC line (right axis) — filter to match polymarket time range
+    if (btcData.length) {
+        let btcFiltered = btcData;
+        if (allTimestamps.length) {
+            const minTs = Math.min(...allTimestamps);
+            const maxTs = Math.max(...allTimestamps);
+            btcFiltered = btcData.filter(c => c.ts >= minTs && c.ts <= maxTs);
+        }
+        if (btcFiltered.length) {
+            datasets.unshift({
+                label: 'BTC Price',
+                data: btcFiltered.map(c => ({ x: c.ts, y: c.close })),
+                borderColor: '#888',
+                borderWidth: 1.5,
+                pointRadius: 0,
+                yAxisID: 'yBTC',
+                order: 10,
+            });
         }
     }
 
