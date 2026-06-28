@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PolyBot</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+</head>
+<body>
+    <div class="header">
+        <h1>PolyBot</h1>
+        <div>
+            <span class="btc-price" id="btcPrice">$--</span>
+            <span class="status" id="connStatus">connecting...</span>
+        </div>
+    </div>
+
+    <div class="tabs">
+        <button class="tab-btn active" data-tab="charts">Charts</button>
+        <button class="tab-btn" data-tab="backtest">Strategy & Backtest</button>
+        <button class="tab-btn" data-tab="paper">Paper Trading</button>
+    </div>
+
+    <!-- ═══ Tab 1: Charts ═══ -->
+    <div id="tab-charts" class="tab-content active">
+        <div class="card">
+            <div class="controls">
+                <select id="chartRange">
+                    <option value="1d">1 Day</option>
+                    <option value="1w">1 Week</option>
+                    <option value="1m" selected>Full Month</option>
+                </select>
+                <select id="chartStrike" multiple size="4" style="min-width:200px;height:80px;">
+                </select>
+                <button onclick="loadChart()">Update Chart</button>
+            </div>
+            <div class="chart-container">
+                <canvas id="priceChart"></canvas>
+            </div>
+        </div>
+        <div class="card">
+            <h2>Live Markets</h2>
+            <table id="marketsTable">
+                <thead>
+                    <tr><th>Strike</th><th>Type</th><th>Title</th><th>Bid</th><th>Ask</th><th>Mid</th></tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- ═══ Tab 2: Strategy & Backtest ═══ -->
+    <div id="tab-backtest" class="tab-content">
+        <div class="card">
+            <h2>Strategies</h2>
+            <div class="strategy-grid" id="strategyGrid"></div>
+        </div>
+        <div class="card">
+            <h2>Run Backtest</h2>
+            <div class="controls">
+                <select id="btMonth"></select>
+                <label>Balance: <input type="number" id="btBalance" value="1000" style="width:80px"></label>
+                <label>Risk%: <input type="number" id="btRisk" value="3" step="0.5" style="width:60px"></label>
+                <label>Max Pos: <input type="number" id="btMaxPos" value="5" style="width:50px"></label>
+                <button onclick="runBacktest()">Run Backtest</button>
+            </div>
+            <div id="btStatus" style="color:var(--text2);margin:8px 0;"></div>
+        </div>
+        <div id="btResults" style="display:none;">
+            <div class="card">
+                <h2>Results</h2>
+                <div class="metrics" id="btMetrics"></div>
+                <div class="chart-container" style="height:300px;">
+                    <canvas id="btEquityChart"></canvas>
+                </div>
+            </div>
+            <div class="card">
+                <h2>Per-Strategy Breakdown</h2>
+                <table id="btStratTable">
+                    <thead><tr><th>Strategy</th><th>Name</th><th>Trades</th><th>W</th><th>L</th><th>WR</th><th>PnL</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+            <div class="card">
+                <h2>Trade Log</h2>
+                <table id="btTradesTable">
+                    <thead><tr><th>Strategy</th><th>Action</th><th>Market</th><th>Entry</th><th>Exit</th><th>PnL</th><th>PnL%</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ Tab 3: Paper Trading ═══ -->
+    <div id="tab-paper" class="tab-content">
+        <div class="card">
+            <div class="controls">
+                <button id="paperToggle" onclick="togglePaper()">Start</button>
+                <button class="danger" onclick="resetPaper()">Reset</button>
+                <label>Balance: <input type="number" id="paperBalance" value="1000" style="width:80px"></label>
+                <label>Risk%: <input type="number" id="paperRisk" value="3" step="0.5" style="width:60px"></label>
+                <label>Max Pos: <input type="number" id="paperMaxPos" value="5" style="width:50px"></label>
+                <button class="secondary" onclick="updatePaperConfig()">Save Config</button>
+            </div>
+        </div>
+        <div class="metrics" id="paperMetrics">
+            <div class="metric"><div class="label">Balance</div><div class="value" id="pmBalance">$1,000</div></div>
+            <div class="metric"><div class="label">Equity</div><div class="value" id="pmEquity">$1,000</div></div>
+            <div class="metric"><div class="label">ROI</div><div class="value" id="pmROI">0%</div></div>
+            <div class="metric"><div class="label">P/L</div><div class="value" id="pmPnL">$0</div></div>
+            <div class="metric"><div class="label">Win Rate</div><div class="value" id="pmWR">-</div></div>
+            <div class="metric"><div class="label">Trades</div><div class="value" id="pmTrades">0</div></div>
+            <div class="metric"><div class="label">Open</div><div class="value" id="pmOpen">0</div></div>
+        </div>
+        <div class="card">
+            <h2>Equity Curve</h2>
+            <div class="chart-container" style="height:250px;">
+                <canvas id="paperEquityChart"></canvas>
+            </div>
+        </div>
+        <div class="card">
+            <h2>Open Positions</h2>
+            <table id="openTradesTable">
+                <thead><tr><th>ID</th><th>Strategy</th><th>Action</th><th>Market</th><th>Entry</th><th>Amount</th><th>Hold</th></tr></thead>
+                <tbody></tbody>
+            </table>
+        </div>
+        <div class="card">
+            <h2>Trade History</h2>
+            <table id="closedTradesTable">
+                <thead><tr><th>ID</th><th>Strategy</th><th>Action</th><th>Market</th><th>Entry</th><th>Exit</th><th>PnL</th><th>PnL%</th><th>Date</th></tr></thead>
+                <tbody></tbody>
+            </table>
+        </div>
+        <div class="card">
+            <h2>Per-Strategy Performance</h2>
+            <table id="paperStratTable">
+                <thead><tr><th>Strategy</th><th>Name</th><th>Trades</th><th>W</th><th>L</th><th>WR</th><th>PnL</th></tr></thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
