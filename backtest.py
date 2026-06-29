@@ -144,10 +144,11 @@ def run_backtest(
                 still_open.append(pos)
         open_positions = still_open
 
-        # Evaluate new entries — collect candidates, pick best per strategy
+        # Evaluate new entries
         if len(open_positions) < max_positions and capital > 5:
-            candidates = []  # (sid, market, moneyness, yes_price)
             for market in markets:
+                if len(open_positions) >= max_positions:
+                    break
                 tp = market["target_price"]
                 mtype = market.get("market_type", "reach")
                 moneyness = compute_moneyness(tp, btc_price, mtype)
@@ -161,42 +162,26 @@ def run_backtest(
 
                 if dte < MIN_DTE:
                     continue
-                if any(p["market_id"] == market["market_id"] for p in open_positions):
-                    continue
 
-                for sid, strat in STRATEGIES.items():
+                # Check each strategy
+                for sid, strat in sorted(STRATEGIES.items(), key=lambda x: x[1]["priority"]):
                     if strat["market_type"] != mtype:
                         continue
                     if not (strat["moneyness_min"] <= moneyness <= strat["moneyness_max"]):
                         continue
 
-                    triggered = False
-                    if strat["trigger_type"] == "btc_momentum" and btc_1h_pct is not None:
-                        triggered = btc_1h_pct > strat["btc_1h_threshold"]
-                    elif strat["trigger_type"] == "rsi" and rsi is not None:
-                        if strat["rsi_direction"] == "below":
-                            triggered = rsi < strat["rsi_threshold"]
+                    if rsi is None or btc_1h_pct is None:
+                        continue
+                    if not (strat["rsi_min"] <= rsi < strat["rsi_max"]):
+                        continue
+                    if not (strat["btc_1h_min"] <= btc_1h_pct < strat["btc_1h_max"]):
+                        continue
+                    if not (strat["entry_price_min"] <= yes_price <= strat["entry_price_max"]):
+                        continue
 
-                    if triggered:
-                        candidates.append((sid, market, moneyness, yes_price))
-
-            # Pick best candidate per strategy (closest to ATM)
-            best = {}
-            for sid, market, moneyness, yes_price in candidates:
-                max_per = STRATEGIES[sid].get("max_entries_per_signal", 1)
-                if sid not in best:
-                    best[sid] = []
-                best[sid].append((abs(moneyness), market, yes_price))
-
-            for sid in sorted(best.keys(), key=lambda s: STRATEGIES[s]["priority"]):
-                if len(open_positions) >= max_positions:
-                    break
-                strat = STRATEGIES[sid]
-                max_per = strat.get("max_entries_per_signal", 1)
-                entries = sorted(best[sid])[:max_per]
-                for _, market, yes_price in entries:
-                    if len(open_positions) >= max_positions:
-                        break
+                    # Don't double up on same market
+                    if any(p["market_id"] == market["market_id"] for p in open_positions):
+                        continue
 
                     amount = round(capital * risk_pct, 2)
                     if amount < 1:
@@ -209,8 +194,8 @@ def run_backtest(
                         "strategy": sid,
                         "market_id": market["market_id"],
                         "market_title": market.get("title", ""),
-                        "target_price": market["target_price"],
-                        "market_type": market.get("market_type", "reach"),
+                        "target_price": tp,
+                        "market_type": mtype,
                         "action": strat["action"],
                         "entry_price": yes_price,
                         "amount": amount,
@@ -218,6 +203,7 @@ def run_backtest(
                         "entry_ts": ts,
                         "hold_hours": strat["hold_hours"],
                     })
+                    break  # one entry per market per tick
 
         # Record equity
         open_value = sum(p["amount"] for p in open_positions)

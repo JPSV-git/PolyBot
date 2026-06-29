@@ -10,10 +10,14 @@ import asyncio
 from datetime import datetime, timezone
 from typing import Optional, Dict, List
 
+import ssl
+
 import httpx
 
 from config import GAMMA_API, CLOB_API, MONTHLY_SLUG_TEMPLATE
 
+_SSL_CTX = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+_SSL_CTX.load_default_certs()
 _TIMEOUT = httpx.Timeout(10.0)
 _FAST_TIMEOUT = httpx.Timeout(5.0)
 
@@ -95,7 +99,7 @@ async def discover_monthly_markets(month_name: str, year: int) -> List[Dict]:
     slug = MONTHLY_SLUG_TEMPLATE.format(month=month_name.lower(), year=year)
     month_tag = f"{year}-{_month_number(month_name):02d}"
 
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
+    async with httpx.AsyncClient(timeout=_TIMEOUT, verify=_SSL_CTX) as c:
         for closed in ["false", "true"]:
             try:
                 resp = await c.get(f"{GAMMA_API}/events", params={"slug": slug, "closed": closed})
@@ -134,7 +138,7 @@ async def discover_current_month_markets() -> List[Dict]:
 async def fetch_order_book(token_id: str) -> Optional[Dict]:
     if not token_id:
         return None
-    async with httpx.AsyncClient(timeout=_FAST_TIMEOUT) as c:
+    async with httpx.AsyncClient(timeout=_FAST_TIMEOUT, verify=_SSL_CTX) as c:
         try:
             resp = await c.get(f"{CLOB_API}/book", params={"token_id": token_id})
             resp.raise_for_status()
@@ -165,7 +169,7 @@ async def fetch_order_book(token_id: str) -> Optional[Dict]:
 
 
 async def fetch_all_order_books(markets: List[Dict]) -> Dict[str, Dict]:
-    async with httpx.AsyncClient(timeout=_FAST_TIMEOUT) as c:
+    async with httpx.AsyncClient(timeout=_FAST_TIMEOUT, verify=_SSL_CTX) as c:
         async def _fetch_one(market):
             token_id = market.get("yes_token_id") or ""
             market_id = market.get("market_id") or ""
@@ -200,14 +204,15 @@ async def fetch_all_order_books(markets: List[Dict]) -> Dict[str, Dict]:
         return {mid: data for mid, data in results if data is not None}
 
 
-async def fetch_price_history(token_id: str) -> List[Dict]:
+async def fetch_price_history(token_id: str, start_ts: int = 0) -> List[Dict]:
     if not token_id:
         return []
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
+    async with httpx.AsyncClient(timeout=_TIMEOUT, verify=_SSL_CTX) as c:
         try:
-            resp = await c.get(f"{CLOB_API}/prices-history", params={
-                "market": token_id, "interval": "max", "fidelity": 60
-            })
+            params = {"market": token_id, "interval": "max", "fidelity": 1}
+            if start_ts > 0:
+                params["startTs"] = start_ts
+            resp = await c.get(f"{CLOB_API}/prices-history", params=params)
             data = resp.json()
             return data.get("history", []) if isinstance(data, dict) else []
         except Exception as e:

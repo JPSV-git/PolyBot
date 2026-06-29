@@ -128,7 +128,7 @@ async def polymarket_price_loop():
 
 
 async def price_history_backfill_loop():
-    """Backfill price history for any market that has no history yet. Runs periodically."""
+    """Gap-filling backfill: on startup fetches all missing history, then periodically fills gaps."""
     await asyncio.sleep(15)
     while True:
         try:
@@ -137,29 +137,21 @@ async def price_history_backfill_loop():
                 print("[backfill] No markets yet, waiting...")
                 await asyncio.sleep(300)
                 continue
-            # Only backfill markets that have no history stored yet
-            markets_needing_backfill = []
-            for m in markets:
-                if not m.get("yes_token_id"):
-                    continue
-                existing = db.get_price_history(market_id=m["market_id"])
-                if not existing:
-                    markets_needing_backfill.append(m)
-            if not markets_needing_backfill:
-                await asyncio.sleep(3600)  # check again in 1h (new month may bring new markets)
-                continue
-            print(f"[backfill] {len(markets_needing_backfill)} markets need history backfill")
             total = 0
-            for m in markets_needing_backfill:
+            for m in markets:
                 token = m.get("yes_token_id")
                 if not token:
                     continue
-                history = await poly.fetch_price_history(token)
+                latest_ts = db.get_latest_price_history_ts(m["market_id"])
+                history = await poly.fetch_price_history(token, start_ts=latest_ts)
                 if history:
-                    stored = db.store_price_history_bulk(m["market_id"], history)
-                    total += stored
+                    new_points = [h for h in history if int(h.get("t", 0)) > latest_ts]
+                    if new_points:
+                        stored = db.store_price_history_bulk(m["market_id"], new_points)
+                        total += stored
                 await asyncio.sleep(0.3)
-            print(f"[backfill] Stored {total} historical price points")
+            if total:
+                print(f"[backfill] Stored {total} new price history points")
         except Exception as e:
             print(f"[backfill] {e}")
         await asyncio.sleep(3600)
@@ -238,6 +230,22 @@ async def ws_broadcast_loop():
             state.ws_clients.remove(ws)
 
 
+async def daily_backup_loop():
+    """Daily DB backup — one copy per calendar day into data/backups/{YYYY-MM}/."""
+    await asyncio.sleep(60)
+    last_backup_date = None
+    while True:
+        try:
+            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            if today != last_backup_date:
+                path = db.backup_db()
+                last_backup_date = today
+                print(f"[backup] Daily backup saved: {path}")
+        except Exception as e:
+            print(f"[backup] {e}")
+        await asyncio.sleep(3600)
+
+
 # ── Lifespan ─────────────────────────────────────────────────────────────────
 
 @asynccontextmanager
@@ -251,6 +259,7 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(price_history_backfill_loop()),
         asyncio.create_task(paper_trading_loop()),
         asyncio.create_task(ws_broadcast_loop()),
+        asyncio.create_task(daily_backup_loop()),
     ]
     yield
     for t in tasks:
@@ -321,10 +330,24 @@ async def api_market_history(market_id: str, range: str = "1m"):
 async def api_strikes(month: Optional[str] = None):
     m = month or state.active_month
     markets = db.get_markets(month=m)
-    strikes = sorted(set(mk["target_price"] for mk in markets))
+    # Filter to markets with live order book data or historical prices
+    active = []
+    seen = set()
+    for mk in markets:
+        mid = mk["market_id"]
+        has_live = mid in state.markets_live
+        has_history = bool(db.get_price_history(market_id=mid))
+        if not has_live and not has_history:
+            continue
+        key = (mk["target_price"], mk["market_type"])
+        if key in seen:
+            continue
+        seen.add(key)
+        active.append(mk)
+    strikes = sorted(set(mk["target_price"] for mk in active))
     return [{"target_price": s, "markets": [
         {"market_id": mk["market_id"], "title": mk["title"], "market_type": mk["market_type"]}
-        for mk in markets if mk["target_price"] == s
+        for mk in active if mk["target_price"] == s
     ]} for s in strikes]
 
 

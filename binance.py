@@ -6,16 +6,20 @@ Also computes RSI and momentum indicators.
 import time
 from typing import Optional, List
 
+import ssl
+
 import httpx
 import numpy as np
 
 from config import BINANCE_API
 
+_SSL_CTX = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+_SSL_CTX.load_default_certs()
 _TIMEOUT = httpx.Timeout(10.0)
 
 
 async def get_btc_price() -> Optional[float]:
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
+    async with httpx.AsyncClient(timeout=_TIMEOUT, verify=_SSL_CTX) as c:
         try:
             resp = await c.get(f"{BINANCE_API}/api/v3/ticker/price", params={"symbol": "BTCUSDT"})
             return float(resp.json()["price"])
@@ -26,7 +30,7 @@ async def get_btc_price() -> Optional[float]:
 async def get_klines(start_ms: int, end_ms: int = None, interval: str = "1m", limit: int = 1000) -> List[dict]:
     candles = []
     cursor = start_ms
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
+    async with httpx.AsyncClient(timeout=_TIMEOUT, verify=_SSL_CTX) as c:
         while True:
             params = {"symbol": "BTCUSDT", "interval": interval, "startTime": cursor, "limit": limit}
             if end_ms:

@@ -208,11 +208,27 @@ async function loadChart() {
                             const d = new Date(ts);
                             return d.toLocaleDateString(undefined, {weekday:'short', month:'short', day:'numeric', year:'numeric'}) + '  ' + d.toLocaleTimeString();
                         },
-                        label: (item) => {
-                            const v = item.raw.y;
-                            if (item.dataset.yAxisID === 'yBTC')
-                                return `  ${item.dataset.label}: $${v.toLocaleString(undefined, {maximumFractionDigits: 0})}`;
-                            return `  ${item.dataset.label}: $${v.toFixed(3)} (${(v*100).toFixed(1)}%)`;
+                        label: () => null,
+                        afterBody: (items) => {
+                            if (!items.length) return [];
+                            const chart = items[0].chart;
+                            const hoveredX = items[0].parsed.x;
+                            const lines = [];
+                            chart.data.datasets.forEach((ds, i) => {
+                                if (chart.getDatasetMeta(i).hidden || !ds.data || !ds.data.length) return;
+                                let nearest = null, nearestDist = Infinity;
+                                for (const pt of ds.data) {
+                                    const dist = Math.abs(pt.x - hoveredX);
+                                    if (dist < nearestDist) { nearestDist = dist; nearest = pt; }
+                                }
+                                if (!nearest) return;
+                                const v = nearest.y;
+                                if (ds.yAxisID === 'yBTC')
+                                    lines.push(`  ${ds.label}: $${v.toLocaleString(undefined, {maximumFractionDigits: 0})}`);
+                                else
+                                    lines.push(`  ${ds.label}: $${v.toFixed(3)} (${(v*100).toFixed(1)}%)`);
+                            });
+                            return lines;
                         }
                     }
                 },

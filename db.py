@@ -3,6 +3,7 @@ SQLite database layer — WAL mode for concurrent reads/writes.
 """
 
 import sqlite3
+import shutil
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -271,6 +272,28 @@ def get_price_history(market_id: str = None, month: str = None):
 def get_price_history_count():
     with get_db() as conn:
         return conn.execute("SELECT COUNT(*) as c FROM price_history").fetchone()["c"]
+
+
+def get_latest_price_history_ts(market_id: str) -> int:
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT MAX(timestamp) as ts FROM price_history WHERE market_id=?",
+            (market_id,)
+        ).fetchone()
+        return row["ts"] if row and row["ts"] else 0
+
+
+# ── Backup ────────────────────────────────────────────────────────────────────
+
+def backup_db() -> str:
+    now = datetime.now(timezone.utc)
+    month_dir = DB_PATH.parent / "backups" / now.strftime("%Y-%m")
+    month_dir.mkdir(parents=True, exist_ok=True)
+    dest = month_dir / f"{now.strftime('%Y-%m-%d')}.db"
+    with get_db() as conn:
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    shutil.copy2(str(DB_PATH), str(dest))
+    return str(dest)
 
 
 # ── Paper state ──────────────────────────────────────────────────────────────

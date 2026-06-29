@@ -17,13 +17,16 @@ def compute_indicators(closes_1m: List[float]) -> Dict:
 
 def compute_moneyness(target_price: float, btc_price: float, market_type: str) -> float:
     """
-    Same formula for both market types: (btc_price - target_price) / target_price * 100
-    Positive = BTC is above target, Negative = BTC is below target.
-    This matches the original analysis convention exactly.
+    For 'reach' markets: negative = OTM (BTC below target), positive = ITM
+    For 'dip' markets:   negative = OTM (BTC above target), positive = ITM (BTC already dipped past)
+    This matches the analysis convention used in strategy discovery.
     """
-    if btc_price == 0 or target_price == 0:
+    if btc_price == 0:
         return 0
-    return (btc_price - target_price) / target_price * 100
+    if market_type == "reach":
+        return (btc_price - target_price) / target_price * 100
+    else:
+        return (target_price - btc_price) / btc_price * 100
 
 
 def find_eligible_trades(indicators: Dict, markets: List[Dict]) -> List[Dict]:
@@ -52,46 +55,32 @@ def find_eligible_trades(indicators: Dict, markets: List[Dict]) -> List[Dict]:
             if not (strat["moneyness_min"] <= moneyness <= strat["moneyness_max"]):
                 continue
 
-            triggered = False
-            if strat["trigger_type"] == "btc_momentum" and btc_1h is not None:
-                triggered = btc_1h > strat["btc_1h_threshold"]
-            elif strat["trigger_type"] == "rsi" and rsi is not None:
-                if strat["rsi_direction"] == "below":
-                    triggered = rsi < strat["rsi_threshold"]
+            if rsi is None or btc_1h is None:
+                continue
+            if not (strat["rsi_min"] <= rsi < strat["rsi_max"]):
+                continue
+            if not (strat["btc_1h_min"] <= btc_1h < strat["btc_1h_max"]):
+                continue
+            if not (strat["entry_price_min"] <= yes_mid <= strat["entry_price_max"]):
+                continue
 
-            if triggered:
-                candidates.append({
-                    "strategy": sid,
-                    "market_id": market["market_id"],
-                    "market_title": market.get("title", ""),
-                    "target_price": tp,
-                    "market_type": mtype,
-                    "action": strat["action"],
-                    "token_side": strat["token_side"],
-                    "hold_hours": strat["hold_hours"],
-                    "moneyness_pct": round(moneyness, 2),
-                    "priority": strat["priority"],
-                    "yes_mid": yes_mid,
-                    "yes_bid": market.get("yes_bid", 0),
-                    "yes_ask": market.get("yes_ask", 0),
-                    "ask_depth_usd": market.get("ask_depth_usd", 0),
-                    "bid_depth_usd": market.get("bid_depth_usd", 0),
-                })
+            candidates.append({
+                "strategy": sid,
+                "market_id": market["market_id"],
+                "market_title": market.get("title", ""),
+                "target_price": tp,
+                "market_type": mtype,
+                "action": strat["action"],
+                "token_side": strat["token_side"],
+                "hold_hours": strat["hold_hours"],
+                "moneyness_pct": round(moneyness, 2),
+                "priority": strat["priority"],
+                "yes_mid": yes_mid,
+                "yes_bid": market.get("yes_bid", 0),
+                "yes_ask": market.get("yes_ask", 0),
+                "ask_depth_usd": market.get("ask_depth_usd", 0),
+                "bid_depth_usd": market.get("bid_depth_usd", 0),
+            })
 
-    # For each strategy, pick only the best candidate (closest to ATM)
-    best_per_strat = {}
-    for c in candidates:
-        sid = c["strategy"]
-        max_per = STRATEGIES[sid].get("max_entries_per_signal", 99)
-        if sid not in best_per_strat:
-            best_per_strat[sid] = []
-        best_per_strat[sid].append(c)
-
-    final = []
-    for sid, cands in best_per_strat.items():
-        max_per = STRATEGIES[sid].get("max_entries_per_signal", 99)
-        cands.sort(key=lambda x: abs(x["moneyness_pct"]))
-        final.extend(cands[:max_per])
-
-    final.sort(key=lambda x: x["priority"])
-    return final
+    candidates.sort(key=lambda x: x["priority"])
+    return candidates
