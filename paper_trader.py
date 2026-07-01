@@ -155,6 +155,50 @@ def check_entries(indicators: Dict, markets_enriched: List[Dict]) -> List[Dict]:
     return new_trades
 
 
+def get_open_pnl(markets_live: Dict) -> List[Dict]:
+    """Return open positions enriched with current price and unrealized P&L."""
+    open_trades = db.get_paper_trades(status="open")
+    now = datetime.now(timezone.utc)
+    result = []
+
+    for trade in open_trades:
+        market_data = markets_live.get(trade["market_id"])
+
+        # Current mark price (same logic as exit pricing)
+        if market_data:
+            if trade["token_side"] == "yes":
+                current_price = market_data.get("yes_bid") or market_data.get("yes_mid") or trade["entry_price"]
+            else:
+                ask = market_data.get("yes_ask")
+                current_price = (1.0 - ask) if ask else trade["entry_price"]
+        else:
+            current_price = trade["entry_price"]
+
+        shares = trade["shares"] or 0
+        if trade["action"] == "SELL":
+            unrealized_pnl = shares * (trade["entry_price"] - current_price) - SPREAD_COST * shares
+        else:
+            unrealized_pnl = shares * (current_price - trade["entry_price"]) - SPREAD_COST * shares
+
+        unrealized_pct = round(unrealized_pnl / trade["amount"] * 100, 2) if trade["amount"] else 0
+
+        # Time remaining
+        created = datetime.fromisoformat(trade["created_at"].replace("Z", "+00:00")) if trade["created_at"] else now
+        hold_elapsed_h = (now - created).total_seconds() / 3600
+        hold_remaining_h = max(0, trade["hold_hours_target"] - hold_elapsed_h)
+
+        result.append({
+            **trade,
+            "current_price": round(current_price, 4),
+            "unrealized_pnl": round(unrealized_pnl, 4),
+            "unrealized_pct": unrealized_pct,
+            "hold_elapsed_h": round(hold_elapsed_h, 1),
+            "hold_remaining_h": round(hold_remaining_h, 1),
+        })
+
+    return result
+
+
 def get_metrics() -> Dict:
     """Compute current paper trading metrics."""
     ps = db.get_paper_state()

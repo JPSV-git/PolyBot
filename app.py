@@ -154,7 +154,7 @@ async def price_history_backfill_loop():
                 print(f"[backfill] Stored {total} new price history points")
         except Exception as e:
             print(f"[backfill] {e}")
-        await asyncio.sleep(3600)
+        await asyncio.sleep(600)
 
 
 async def paper_trading_loop():
@@ -469,7 +469,15 @@ async def api_paper_config(cfg: PaperConfig):
 
 @app.get("/api/paper/trades")
 async def api_paper_trades(status: Optional[str] = None):
+    if status == "open":
+        # Enrich open trades with live unrealized P&L
+        return paper_trader.get_open_pnl(state.markets_live)
     return db.get_paper_trades(status=status)
+
+
+@app.get("/api/paper/open-pnl")
+async def api_paper_open_pnl():
+    return paper_trader.get_open_pnl(state.markets_live)
 
 
 @app.get("/api/paper/equity")

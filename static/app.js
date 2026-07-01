@@ -421,14 +421,17 @@ async function runBacktest() {
 // ── Paper Trading tab ───────────────────────────────────────────────────────
 
 async function loadPaperState() {
-    const [stateResp, tradesResp, equityResp] = await Promise.all([
+    const [stateResp, openResp, closedResp, equityResp] = await Promise.all([
         fetch('/api/paper/state'),
-        fetch('/api/paper/trades'),
+        fetch('/api/paper/trades?status=open'),    // enriched with live P&L
+        fetch('/api/paper/trades?status=closed'),
         fetch('/api/paper/equity'),
     ]);
     const state = await stateResp.json();
-    const trades = await tradesResp.json();
+    const openTrades = await openResp.json();
+    const closedTrades = await closedResp.json();
     const equity = await equityResp.json();
+    const trades = [...openTrades, ...closedTrades];
 
     // Toggle button
     const btn = document.getElementById('paperToggle');
@@ -450,19 +453,26 @@ async function loadPaperState() {
     setMetric('pmOpen', state.open_positions);
 
     // Open positions
-    const openTrades = trades.filter(t => t.status === 'open');
-    const closedTrades = trades.filter(t => t.status === 'closed');
-
     document.querySelector('#openTradesTable tbody').innerHTML = openTrades.map(t => {
-        const created = new Date(t.created_at + 'Z');
-        const hoursHeld = ((Date.now() - created.getTime()) / 3600000).toFixed(1);
+        const pnl = t.unrealized_pnl ?? 0;
+        const pct = t.unrealized_pct ?? 0;
+        const cls = pnl > 0 ? 'pnl-pos' : pnl < 0 ? 'pnl-neg' : '';
+        const cur = t.current_price != null ? `$${t.current_price.toFixed(3)}` : '-';
+        const elapsed = t.hold_elapsed_h ?? '?';
+        const remaining = t.hold_remaining_h ?? '?';
         return `<tr>
-            <td>${t.id}</td><td><b>${t.strategy}</b></td><td>${t.action}</td>
-            <td>${t.market_title ? t.market_title.substring(0, 30) : ''}</td>
-            <td>$${t.entry_price.toFixed(3)}</td><td>$${t.amount.toFixed(2)}</td>
-            <td>${hoursHeld}h / ${t.hold_hours_target}h</td>
+            <td>${t.id}</td>
+            <td><b>${t.strategy}</b></td>
+            <td>${t.action}</td>
+            <td>${t.market_title ? t.market_title.substring(0, 28) : ''}</td>
+            <td>$${t.entry_price.toFixed(3)}</td>
+            <td>${cur}</td>
+            <td>$${t.amount.toFixed(2)}</td>
+            <td class="${cls}">$${pnl.toFixed(2)}</td>
+            <td class="${cls}">${pct > 0 ? '+' : ''}${pct.toFixed(1)}%</td>
+            <td>${elapsed}h done / ${remaining}h left</td>
         </tr>`;
-    }).join('') || '<tr><td colspan="7" style="color:var(--text2)">No open positions</td></tr>';
+    }).join('') || '<tr><td colspan="10" style="color:var(--text2)">No open positions</td></tr>';
 
     document.querySelector('#closedTradesTable tbody').innerHTML = closedTrades.slice(0, 50).map(t =>
         `<tr>
@@ -552,7 +562,7 @@ async function updatePaperConfig() {
 
 function startPaperPolling() {
     stopPaperPolling();
-    paperPollInterval = setInterval(loadPaperState, 10000);
+    paperPollInterval = setInterval(loadPaperState, 5000);
 }
 
 function stopPaperPolling() {
