@@ -171,21 +171,33 @@ def get_open_pnl(markets_live: Dict) -> List[Dict]:
     for trade in open_trades:
         market_data = markets_live.get(trade["market_id"])
 
-        # Current mark price (same logic as exit pricing)
+        # Current YES mid price — used consistently regardless of BUY/SELL direction.
+        # entry_price is always stored as YES mid at entry time, so we compare YES-to-YES.
+        # For BUY YES: profit when YES rises. For SELL YES (buy NO): profit when YES falls.
+        current_price = None
         if market_data:
-            if trade["token_side"] == "yes":
-                current_price = market_data.get("yes_bid") or market_data.get("yes_mid") or trade["entry_price"]
-            else:
-                ask = market_data.get("yes_ask")
-                current_price = (1.0 - ask) if ask else trade["entry_price"]
-        else:
-            current_price = trade["entry_price"]
+            current_price = market_data.get("yes_mid") or market_data.get("yes_bid")
+        # Fall back to latest stored price history if not in live feed
+        if not current_price:
+            history = db.get_price_history(market_id=trade["market_id"])
+            if history:
+                current_price = history[-1]["yes_price"]
+        if not current_price:
+            # Last resort: snapshots
+            snaps = db.get_price_snapshots(trade["market_id"])
+            if snaps:
+                current_price = snaps[-1]["yes_mid"]
+        if not current_price:
+            current_price = trade["entry_price"]  # truly unknown — show flat
 
         shares = trade["shares"] or 0
+        entry = trade["entry_price"]
         if trade["action"] == "SELL":
-            unrealized_pnl = shares * (trade["entry_price"] - current_price) - SPREAD_COST * shares
+            # Sold YES at entry YES mid → profit when YES price falls
+            unrealized_pnl = shares * (entry - current_price) - SPREAD_COST * shares
         else:
-            unrealized_pnl = shares * (current_price - trade["entry_price"]) - SPREAD_COST * shares
+            # Bought YES at entry YES ask → profit when YES price rises
+            unrealized_pnl = shares * (current_price - entry) - SPREAD_COST * shares
 
         unrealized_pct = round(unrealized_pnl / trade["amount"] * 100, 2) if trade["amount"] else 0
 
