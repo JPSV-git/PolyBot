@@ -183,7 +183,14 @@ def get_open_pnl(markets_live: Dict) -> List[Dict]:
         unrealized_pct = round(unrealized_pnl / trade["amount"] * 100, 2) if trade["amount"] else 0
 
         # Time remaining
-        created = datetime.fromisoformat(trade["created_at"].replace("Z", "+00:00")) if trade["created_at"] else now
+        raw = trade["created_at"] or ""
+        try:
+            if "+" in raw or raw.endswith("Z"):
+                created = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            else:
+                created = datetime.fromisoformat(raw).replace(tzinfo=timezone.utc)
+        except Exception:
+            created = now
         hold_elapsed_h = (now - created).total_seconds() / 3600
         hold_remaining_h = max(0, trade["hold_hours_target"] - hold_elapsed_h)
 
