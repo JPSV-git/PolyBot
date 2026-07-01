@@ -28,7 +28,14 @@ def check_exits(markets_live: Dict[str, Dict]) -> List[Dict]:
     now = datetime.now(timezone.utc)
 
     for trade in open_trades:
-        created = datetime.fromisoformat(trade["created_at"].replace("Z", "+00:00")) if trade["created_at"] else now
+        raw = trade["created_at"] or ""
+        try:
+            if "+" in raw or raw.endswith("Z"):
+                created = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            else:
+                created = datetime.fromisoformat(raw).replace(tzinfo=timezone.utc)
+        except Exception:
+            created = now
         hold_elapsed = (now - created).total_seconds() / 3600
 
         if hold_elapsed < trade["hold_hours_target"]:
