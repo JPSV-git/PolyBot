@@ -89,8 +89,27 @@ function updateMarketsTable(markets) {
 
 // ── Charts tab ──────────────────────────────────────────────────────────────
 
+async function loadMonths() {
+    const resp = await fetch('/api/months');
+    const months = await resp.json();
+    const sel = document.getElementById('chartMonth');
+    sel.innerHTML = '';
+    // Sort descending so current month is first
+    const sorted = [...months].sort((a, b) => b.localeCompare(a));
+    for (const m of sorted) {
+        const opt = document.createElement('option');
+        opt.value = m;
+        opt.textContent = m;
+        sel.appendChild(opt);
+    }
+    // Default to latest (current) month
+    if (sel.options.length) sel.options[0].selected = true;
+    await loadStrikes();
+}
+
 async function loadStrikes() {
-    const resp = await fetch('/api/strikes');
+    const month = document.getElementById('chartMonth').value;
+    const resp = await fetch(`/api/strikes?month=${month}`);
     const data = await resp.json();
     const sel = document.getElementById('chartStrike');
     sel.innerHTML = '';
@@ -105,12 +124,14 @@ async function loadStrikes() {
             sel.appendChild(opt);
         }
     }
-    // Pre-select some interesting markets (near mid-range strikes)
+    // Pre-select 2-3 mid-range markets
     const opts = Array.from(sel.options);
     const midIdx = Math.floor(opts.length / 2);
     for (let i = Math.max(0, midIdx - 1); i < Math.min(opts.length, midIdx + 2); i++) {
         opts[i].selected = true;
     }
+    // Auto-update chart when month changes
+    await loadChart();
 }
 
 async function loadChart() {
@@ -541,4 +562,4 @@ function stopPaperPolling() {
 // ── Init ────────────────────────────────────────────────────────────────────
 
 connectWS();
-loadStrikes().then(() => loadChart());
+loadMonths();
